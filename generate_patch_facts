@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Facts:
+# Variables created:
 #  - OS-Release (string)
 #  - Security errata support (boolean)
 #  - EOL (boolean)
@@ -10,29 +10,43 @@
 #
 # 2021-04-18 Kodiak Firesmith <firesmith@protonmail.com>
 
-EOL=("centos5"
-     "centos6"
-     "rhel5"
-     "rhel6"
-     "debian6"
-     "debian7"
-     "debian8"
-     "ubuntu12"
-     "ubuntu14"
-     "ubuntu16"
-     )
+# Don't let this script run w/o the ability to do things like update the package
+#  cache.  And don't accidentally blow out /var/cache with non-root duplicates
+#  of YUM caches.
+if [ $USER != root ]; then
+  echo "this script requires rootly powers"
+  exit 2
+fi
+
+# Simple ISO-8601 date
+date_collected="$(date -I)"
+
+# By default, assume OS updates are not broken.  We check later on if they are.
+os_updates_broken=false
 
 # We use dead-simple tests to infer OS type
 if [ -f /etc/apt/sources.list ]; then os_type=debian
 elif [ -f /etc/yum.conf ]; then os_type=redhat
 fi
 
+# For Debian variants (including Ubuntu), we key off the distro code name in
+#  sources.list.  This quickly allows us to discern Debian vs Ubuntu, in a 
+#  uniform way, across even old versions of either distro, and without counting
+#  on the unreliable presence and format of /etc/lsb-release.
+#
+# Since we know that both Debian and Ubuntu give us a reliable way to discern
+#  bugfix updates from security updates, we use that, and we set errata_support
+#  to true across the board.
 function discern_debvers() {
+  # Here's where we pull our codename.  Every APT-based OS should have an
+  #  'updates main' repo to pull a distro code name from.
   repostring="$(egrep "^deb " /etc/apt/sources.list | grep "updates main")"
-
-
+  # Debian & Ubuntu post security updates in a reliable way
   errata_support=true
 
+  # Set variables based on distro code name.  Ideally we'd be smarter about
+  #  determining whether a given distro code name is EOL based on the current date
+  #  and a list of EOL dates, but no time for that on version 1 of this checker.
   case "$repostring" in
     *squeeze*)
       distro=debian
@@ -104,8 +118,13 @@ function discern_debvers() {
   esac
 }
 
+# This is where we poll status on outstanding updates.
+# We clean the APT cache, then force it to refresh.  By forcing APT cache 
+#  refresh, we ensure we have the most current status for updates, and we catch
+#  any hosts that have broken APT - a common cause for silent patch logjams.
 function debian_check_updates() {
   apt-get clean
+  apt-get -qq update || os_updates_broken=true
   if [ -f "/usr/lib/update-notifier/apt-check" ]; then
     updatedata="$(/usr/lib/update-notifier/apt-check 2>&1)"
     security_updates="$(echo $updatedata | cut -d";" -f2)"
@@ -134,6 +153,7 @@ case $os_type in
     ;;
 esac
 
-echo "EOL status is $EOL, security errata support is $errata_support, distro is $distro, distrovers is $distrovers, security update count is
-$security_updates, all updates count is $all_updates"
+JSON_FMT='{"eol":"%s","errata_support":"%s","security_updates":"%s", "all_updates": "%s", "os_updates_broken": "%s", "date_collected": "%s"}\n'
+
+printf "$JSON_FMT" "$EOL" "$errata_support" "$security_updates" "$all_updates" "$os_updates_broken" "$date_collected"
 
