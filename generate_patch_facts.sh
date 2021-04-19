@@ -13,7 +13,8 @@
 # Don't let this script run w/o the ability to do things like update the package
 #  cache.  And don't accidentally blow out /var/cache with non-root duplicates
 #  of YUM caches.
-if [ $USER != root ]; then
+running_as="$(whoami)" #Turns out we can't trust $USER to always be set :/
+if [[ "$running_as" != "root" ]]; then
   echo "this script requires rootly powers"
   exit 2
 fi
@@ -49,74 +50,97 @@ function discern_debvers() {
   #  and a list of EOL dates, but no time for that on version 1 of this checker.
   case "$repostring" in
     *squeeze*)
-      distro=debian
-      distrovers=6
-      EOL=true
+      distro=debian distrovers=6 EOL=true
       ;;
     *wheezy*)
-      distro=debian
-      distrovers=7
-      EOL=true
+      distro=debian distrovers=7 EOL=true
       ;;
     *jessie*)
-      distro=debian
-      distrovers=8
-      EOL=true
+      distro=debian distrovers=8 EOL=true
       ;;
     *stretch*)
-      distro=debian
-      distrovers=9
-      EOL=false
+      distro=debian distrovers=9 EOL=false
       ;;
     *buster*)
-      distro=debian
-      distrovers=10
-      EOL=false
+      distro=debian distrovers=10 EOL=false
       ;;
     *lucid*)
-      distro=ubuntu
-      distrovers=10
-      EOL=true
+      distro=ubuntu distrovers=10 EOL=true
       ;;
     *precise*)
-      distro=ubuntu
-      distrovers=12
-      EOL=true
+      distro=ubuntu distrovers=12 EOL=true
       ;;
     *trusty*)
-      distro=ubuntu
-      distrovers=14
-      EOL=true
+      distro=ubuntu distrovers=14 EOL=true
       ;;
     *xenial*)
-      distro=ubuntu
-      distrovers=16
-      EOL=true
+      distro=ubuntu distrovers=16 EOL=true
       ;;
     *bionic*)
-      distro=ubuntu
-      distrovers=18
-      EOL=false
+      distro=ubuntu distrovers=18 EOL=false
       ;;
     *focal*)
-      distro=ubuntu
-      distrovers=20
-      EOL=false
+      distro=ubuntu distrovers=20 EOL=false
       ;;
     *groovy*)
-      distro=ubuntu
-      distrovers=20.10
-      EOL=false
+      distro=ubuntu distrovers=20.10 EOL=false
       ;;
     *hirsute*)
-      distro=ubuntu
-      distrovers=21.04
-      EOL=false
+      distro=ubuntu distrovers=21.04 EOL=false
       ;;
     *)
       exit 3
   esac
 }
+
+# For Red Hat variants, we key off of redhat-release which has been predictable
+#  going back at least to RHEL/CentOS 5, which is as far back as we care about.
+# When the distro is RHEL, we know we have reliable errata support, but when
+#  CentOS, we know that we don't have errata support aside from EPEL, so we
+#  mark errata_support as false to denote that we can't distinguish security
+#  updates from normal bugfix package updates.  This sucks, thanks Red Hat.
+function discern_redhatvers() {
+  redhat_release="$(cat /etc/redhat-release)"
+  case "$redhat_release" in
+    *"Red Hat Enterprise Linux"*)
+      distro=rhel
+      errata_support=true
+      case "$redhat_release" in
+        *"Tikanga"*)
+          distrovers=5 EOL=true
+          ;;
+        *"Santiago"*)
+          distrovers=6 EOL=true
+          ;;
+        *"Maipo"*)
+          distrovers=7 EOL=false
+          ;;
+        *"Ootpa"*)
+          distrovers=8 EOL=false
+          ;;
+      esac
+      ;;
+    *"CentOS"*)
+      distro=centos
+      errata_support=false
+      case "$redhat_release" in
+        *"release 5"*)
+          distrovers=5 EOL=true
+          ;;
+        *"release 6"*)
+          distrovers=6 EOL=true
+          ;;
+        *"release 7"*)
+          distrovers=7 EOL=false
+          ;;
+        *"release 8"*)
+          distrovers=8 EOL=false
+          ;;
+      esac
+      ;;
+  esac
+}
+
 
 # This is where we poll status on outstanding updates.
 # We clean the APT cache, then force it to refresh.  By forcing APT cache 
@@ -133,56 +157,6 @@ function debian_check_updates() {
     security_updates="$(apt-get upgrade -s | egrep '^Inst ' | grep -i security | wc -l)"
     all_updates="$(apt-get upgrade -s | egrep '^Inst ' | wc -l)"
   fi
-}
-
-function discern_redhatvers() {
-  redhat_release="$(cat /etc/redhat-release)"
-  case "$redhat_release" in
-    *"Red Hat Enterprise Linux"*)
-      distro=rhel
-      errata_support=true
-      case "$redhat_release" in
-        *"Tikanga"*)
-          distrovers=5
-          EOL=true
-          ;;
-        *"Santiago"*)
-          distrovers=6
-          EOL=true
-          ;;
-        *"Maipo"*)
-          distrovers=7
-          EOL=false
-          ;;
-        *"Ootpa"*)
-          distrovers=8
-          EOL=false
-          ;;
-      esac
-      ;;
-    *"CentOS"*)
-      distro=centos
-      errata_support=false
-      case "$redhat_release" in
-        *"release 5"*)
-          distrovers=5
-          EOL=true
-          ;;
-        *"release 6"*)
-          distrovers=6
-          EOL=true
-          ;;
-        *"release 7"*)
-          distrovers=7
-          EOL=false
-          ;;
-        *"release 8"*)
-          distrovers=8
-          EOL=false
-          ;;
-      esac
-      ;;
-  esac
 }
 
 function redhat_check_updates() {
