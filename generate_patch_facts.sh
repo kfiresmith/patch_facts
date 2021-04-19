@@ -140,6 +140,7 @@ function discern_redhatvers() {
   case "$redhat_release" in
     *"Red Hat Enterprise Linux"*)
       distro=rhel
+      errata_support=true
       case "$redhat_release" in
         *"Tikanga"*)
           distrovers=5
@@ -161,6 +162,7 @@ function discern_redhatvers() {
       ;;
     *"CentOS"*)
       distro=centos
+      errata_support=false
       case "$redhat_release" in
         *"release 5"*)
           distrovers=5
