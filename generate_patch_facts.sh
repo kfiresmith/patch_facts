@@ -19,6 +19,15 @@ if [[ "$running_as" != "root" ]]; then
   exit 2
 fi
 
+# Store output as Ansible fact?
+store_ansible_fact=true
+
+# Ansible fact name
+factname=os_patch_status
+
+# Ansible facts path; where we store our JSON output.
+ansible_factspath=/etc/ansible/facts.d
+
 # Simple ISO-8601 date
 date_collected="$(date -I'minutes')"
 
@@ -148,7 +157,7 @@ function discern_redhatvers() {
 #  any hosts that have broken APT - a common cause for silent patch logjams.
 function debian_check_updates() {
   apt-get clean
-  apt-get -qq update || os_updates_broken=true
+  apt-get -qq update 2>/dev/null || os_updates_broken=true
   if [ -f "/usr/lib/update-notifier/apt-check" ]; then
     updatedata="$(/usr/lib/update-notifier/apt-check 2>&1)"
     security_updates="$(echo $updatedata | cut -d";" -f2)"
@@ -167,6 +176,12 @@ function redhat_check_updates() {
 function centos_check_updates() {
   security_updates="-1"
   all_updates="$(yum check-update -q | wc -l)"
+}
+
+function ensure_ansible_factspath() {
+  if [[ ! -d $ansible_factspath ]]; then
+    mkdir -p $ansible_factspath
+  fi
 }
 
 case $os_type in
@@ -197,7 +212,8 @@ case $os_type in
     ;;
 esac
 
-JSON_FMT='{"eol":"%s","errata_support":"%s","security_updates":"%s", "all_updates": "%s", "os_updates_broken": "%s", "date_collected": "%s"}\n'
-
-printf "$JSON_FMT" "$EOL" "$errata_support" "$security_updates" "$all_updates" "$os_updates_broken" "$date_collected"
-
+if $store_ansible_fact; then
+  ensure_ansible_factspath
+  JSON_FMT='{"eol":"%s","errata_support":"%s","security_updates":"%s", "all_updates": "%s", "os_updates_broken": "%s", "date_collected": "%s"}\n'
+  printf "$JSON_FMT" "$EOL" "$errata_support" "$security_updates" "$all_updates" "$os_updates_broken" "$date_collected" > $ansible_factspath/$factname.fact
+fi
