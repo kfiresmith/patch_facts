@@ -20,7 +20,7 @@ if [[ "$running_as" != "root" ]]; then
 fi
 
 # Simple ISO-8601 date
-date_collected="$(date -I)"
+date_collected="$(date -I'minutes')"
 
 # By default, assume OS updates are not broken.  We check later on if they are.
 os_updates_broken=false
