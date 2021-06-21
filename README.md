@@ -22,14 +22,17 @@ than be used as an executable fact, since querying the OS for patch status can t
 **date_collected:** The ISO-8601 date/time of the last collection.  
 
 ```json
-{
-  "eol": "false",
-  "errata_support": "true",
-  "security_updates": "0",
-  "all_updates": "0",
-  "os_updates_broken": "false",
-  "date_collected": "2021-04-24T08:58-04:00"
-}
+        "ansible_local": {
+            "os_patch_status": {
+                "all_updates": "9",
+                "date_collected": "2021-06-21T18:30-04:00",
+                "eol": "false",
+                "errata_support": "true",
+                "os_updates_broken": "false",
+                "security_updates": "0"
+            }
+        },
+
 ```
 
 ### Resources
