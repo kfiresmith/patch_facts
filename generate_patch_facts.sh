@@ -1,5 +1,17 @@
 #!/bin/bash
 #
+# Collect OS-reported software patch details, format them into JSON, and store
+#   them as an Ansible fact.
+#
+# Supports the following Linux variants and major versions:
+#  - Debian 6 -> 10
+#  - Ubuntu LTS 10 -> 20
+#  - Ubuntu STS 20.10, 21.04
+#
+#  - CentOS 5 -> 8
+#  - RHEL 5 -> 8
+#  - Rocky Linux 8
+#
 # Variables created:
 #  - OS-Release (string)
 #  - Security errata support (boolean)
@@ -9,6 +21,7 @@
 #  - ISO-8601 Date of Collection (string)
 #
 # 2021-04-18 Kodiak Firesmith <firesmith@protonmail.com>
+# Updated 2021-06: Add extra capability for Rocky Linux.
 
 # Don't let this script run w/o the ability to do things like update the package
 #  cache.  And don't accidentally blow out /var/cache with non-root duplicates
@@ -103,11 +116,15 @@ function discern_debvers() {
 }
 
 # For Red Hat variants, we key off of redhat-release which has been predictable
-#  going back at least to RHEL/CentOS 5, which is as far back as we care about.
+#   going back at least to RHEL/CentOS 5, which is as far back as we care about.
+#
 # When the distro is RHEL, we know we have reliable errata support, but when
-#  CentOS, we know that we don't have errata support aside from EPEL, so we
-#  mark errata_support as false to denote that we can't distinguish security
-#  updates from normal bugfix package updates.  This sucks, thanks Red Hat.
+#   CentOS, we know that we don't have errata support aside from EPEL, so we
+#   mark errata_support as false to denote that we can't distinguish security
+#   updates from normal bugfix package updates.  This sucks, thanks Red Hat.
+#   Same deal for Rocky Linux, which also fails to distinguish bugfix from
+#   security. (see `dnf check-update --security`)
+
 function discern_redhatvers() {
   redhat_release="$(cat /etc/redhat-release)"
   case "$redhat_release" in
@@ -145,6 +162,15 @@ function discern_redhatvers() {
         *"release 8"*)
           distrovers=8 EOL=false
           ;;
+      esac
+      ;;
+    *"Rocky Linux"*)
+      distro=rocky
+      errata_support=false
+      case "$redhat_release" in
+        *"release 8"*)
+        distrovers=8 EOL=false
+        ;;
       esac
       ;;
   esac
