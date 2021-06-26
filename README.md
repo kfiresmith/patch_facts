@@ -19,6 +19,8 @@ than be used as an executable fact, since querying the OS for patch status can t
 
 **os_updates_broken:** We attempt to catch cases where the OS patch reporting processes are not functional (eg, a broken repo gumming up the works), and report it so that it can be fixed.
 
+**needs_reboot:** Use OS tools to determine if the host needs to be rebooted in order to load patched kernel, libraries, or services.
+
 **date_collected:** The ISO-8601 date/time of the last collection.  
 
 ```json
@@ -29,6 +31,7 @@ than be used as an executable fact, since querying the OS for patch status can t
                 "eol": "false",
                 "errata_support": "true",
                 "os_updates_broken": "false",
+                "needs_reboot": "false",
                 "security_updates": "0"
             }
         },

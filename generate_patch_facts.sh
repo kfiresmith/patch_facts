@@ -47,6 +47,9 @@ date_collected="$(date -I'minutes')"
 # By default, assume OS updates are not broken.  We check later on if they are.
 os_updates_broken=false
 
+# By default, set needs_reboot to unknown
+needs_reboot=unknown
+
 # We use dead-simple tests to infer OS type
 if [ -f /etc/apt/sources.list ]; then os_type=debian
 elif [ -f /etc/yum.conf ]; then os_type=redhat
@@ -60,10 +63,17 @@ fi
 # Since we know that both Debian and Ubuntu give us a reliable way to discern
 #  bugfix updates from security updates, we use that, and we set errata_support
 #  to true across the board.
+
 function discern_debvers() {
+
   # Here's where we pull our codename.  Every APT-based OS should have an
   #  'updates main' repo to pull a distro code name from.
   repostring="$(egrep "^deb " /etc/apt/sources.list | grep "updates main")"
+  # This sorta sucks but it's quick and dirty compensation for the change in repo strings for archive repos.
+  #   eg: `deb http://archive.debian.org/debian squeeze main`
+  if [ -z "$repostring" ]; then
+    repostring="$(egrep 'squeeze|wheezy|jessie|stretch|buster|lucid|precise|trusty|xenial|focal' /etc/apt/sources.list)"
+  fi
   # Debian & Ubuntu post security updates in a reliable way
   errata_support=true
 
@@ -199,6 +209,8 @@ function redhat_check_updates() {
   all_updates="$(yum check-update -q | wc -l)"
 }
 
+# CentOS doesn't publish security errata, so we can't use `list security`.
+# Instead we just toss out `-1` to make it easy to discern that this is a bogus value.
 function centos_check_updates() {
   security_updates="-1"
   all_updates="$(yum check-update -q | wc -l)"
@@ -210,36 +222,89 @@ function ensure_ansible_factspath() {
   fi
 }
 
+# Here's where we try to determine if a system needs to be rebooted in order
+#   to load patched versions of the kernel, services, or libraries.
+
+function needs_reboot() {
+  case $os_type in
+    # For Debian variants, this is easy and uniform across all common versions
+    #   of Debian and Ubuntu.
+    debian)
+      if [ -f /var/run/reboot-required ]; then
+        needs_reboot=true
+      else
+        needs_reboot=false
+      fi
+    ;;
+    redhat)
+      case "$redhat_release" in
+        # For redhat variants this old, we can't easily determine if a system
+        #   needs to be rebooted to apply packages, and in 2021 we should just
+        #   throw the whole computer away if it's still running el5.
+        *"release 5"*)
+          needs_reboot=unknown
+          ;;
+        # The needs-restarting binary is part of yum-utils, which is an optional
+        #   package that we can't trust is installed.
+        # Further, for el6, we don't get a determinative RC from running this 
+        #   command, so we have to check for output, which only happens when
+        #   a system has procs that need to be reloaded.
+        *"release 6"*)
+          if [ -f "/usr/bin/needs-restarting" ]; then
+            restartable_procs=$(/usr/bin/needs-restarting | wc -l)
+            if (( $restartable_procs > 0 )); then
+              needs_reboot=true
+            else
+              needs_reboot=false
+            fi
+          fi
+          ;;
+        # This is the catch-all with the understanding that if it's not el5 nor el6
+        #   that it'll be el7+, which is a new enough version of yum-utils to use a
+        #   determinative RC - 0: all good, 1: needs restarting.
+        *)
+          if [ -f "/usr/bin/needs-restarting" ]; then
+            if /usr/bin/needs-restarting -r 1>/dev/null; then
+              needs_reboot=false
+            else
+              needs_reboot=true
+            fi
+          else
+            needs_reboot=unknown
+          fi
+
+          ;;
+      esac
+    ;;
+  esac
+}
+
+
+# Set all vars aside from needs_reboot
 case $os_type in
   debian)
     discern_debvers
-    if $EOL; then
-      security_updates="-1"
-      all_updates="-1"
-    else
-      debian_check_updates
-    fi
+    debian_check_updates
     ;;
   redhat)
     discern_redhatvers
-    if $EOL; then
-      security_updates="-1"
-      all_updates="-1"
-    else
       if [ "$distro" == "redhat" ]; then
         redhat_check_updates
       else
         centos_check_updates
       fi
-    fi
     ;;
   *)
     exit 2
     ;;
 esac
 
+# Set needs_reboot variable
+needs_reboot
+
+# Write those facts out!
 if $store_ansible_fact; then
   ensure_ansible_factspath
-  JSON_FMT='{"eol":"%s","errata_support":"%s","security_updates":"%s", "all_updates": "%s", "os_updates_broken": "%s", "date_collected": "%s"}\n'
-  printf "$JSON_FMT" "$EOL" "$errata_support" "$security_updates" "$all_updates" "$os_updates_broken" "$date_collected" > $ansible_factspath/$factname.fact
+  JSON_FMT='{"eol":"%s","errata_support":"%s","security_updates":"%s", "all_updates": "%s", "os_updates_broken": "%s", "needs_reboot": "%s", "date_collected": "%s"}\n'
+  printf "$JSON_FMT" "$EOL" "$errata_support" "$security_updates" "$all_updates" "$os_updates_broken" "$needs_reboot" "$date_collected" > $ansible_factspath/$factname.fact
 fi
