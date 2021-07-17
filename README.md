@@ -21,6 +21,8 @@ than be used as an executable fact, since querying the OS for patch status can t
 
 **needs_reboot:** Use OS tools to determine if the host needs to be rebooted in order to load patched kernel, libraries, or services.
 
+**uptime_days** Determine days of uptime as a whole number based on uptime seconds in /proc/uptime. Uptimes under 23h59m59s reported as 0 days up.
+
 **date_collected:** The ISO-8601 date/time of the last collection.  
 
 ```json
@@ -33,6 +35,7 @@ than be used as an executable fact, since querying the OS for patch status can t
                 "os_updates_broken": "false",
                 "needs_reboot": "false",
                 "security_updates": "0"
+                "uptime_days": "0",
             }
         },
 

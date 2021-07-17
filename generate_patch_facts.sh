@@ -44,6 +44,15 @@ ansible_factspath=/etc/ansible/facts.d
 # Simple ISO-8601 date
 date_collected="$(date -I'minutes')"
 
+# Determine uptime days in a pure-bash and multi-distro way, by performing integer
+#  arithmetic based on uptime seconds as reported from /proc/uptime. Bash can't do floating
+#  point math and we don't want to depend on something like `bc`.
+# Because we have to use integers, and we don't want this to become complicated, uptimes from
+#  0 seconds to 23 hours and 59 minutes will be '0 days up', and from thereon will be the whole
+#  number of days up.
+uptime_seconds="$(awk -F'.' '{print $1}' /proc/uptime)"
+uptime_days="$(( $uptime_seconds / 60 / 60 / 24))"
+
 # By default, assume OS updates are not broken.  We check later on if they are.
 os_updates_broken=false
 
@@ -305,6 +314,6 @@ needs_reboot
 # Write those facts out!
 if $store_ansible_fact; then
   ensure_ansible_factspath
-  JSON_FMT='{"eol":"%s","errata_support":"%s","security_updates":"%s", "all_updates": "%s", "os_updates_broken": "%s", "needs_reboot": "%s", "date_collected": "%s"}\n'
-  printf "$JSON_FMT" "$EOL" "$errata_support" "$security_updates" "$all_updates" "$os_updates_broken" "$needs_reboot" "$date_collected" > $ansible_factspath/$factname.fact
+  JSON_FMT='{"eol":"%s","errata_support":"%s","security_updates":"%s", "all_updates": "%s", "os_updates_broken": "%s", "needs_reboot": "%s", "uptime_days": "%s", "date_collected": "%s"}\n'
+  printf "$JSON_FMT" "$EOL" "$errata_support" "$security_updates" "$all_updates" "$os_updates_broken" "$needs_reboot" "$uptime_days" "$date_collected" > $ansible_factspath/$factname.fact
 fi
