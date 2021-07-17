@@ -34,8 +34,8 @@ than be used as an executable fact, since querying the OS for patch status can t
                 "errata_support": "true",
                 "os_updates_broken": "false",
                 "needs_reboot": "false",
-                "security_updates": "0"
-                "uptime_days": "0",
+                "security_updates": "0",
+                "uptime_days": "0"
             }
         },
 
