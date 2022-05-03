@@ -20,8 +20,11 @@
 #  - Security Outstanding Packages Count (integer)
 #  - ISO-8601 Date of Collection (string)
 #
-# 2021-04-18 Kodiak Firesmith <firesmith@protonmail.com>
-# Updated 2021-06: Add extra capability for Rocky Linux.
+# 2022-05-03 Kodiak Firesmith <firesmith@protonmail.com>
+#  - Updated 2022-05: Add support for Ubuntu 22.04 LTS, 21.10
+#                     Set EOL on Debian 9, Ubuntu 21.04
+#  - Updated 2021-06: Add extra capability for Rocky Linux.
+
 
 # Don't let this script run w/o the ability to do things like update the package
 #  cache.  And don't accidentally blow out /var/cache with non-root duplicates
@@ -81,7 +84,7 @@ function discern_debvers() {
   # This sorta sucks but it's quick and dirty compensation for the change in repo strings for archive repos.
   #   eg: `deb http://archive.debian.org/debian squeeze main`
   if [ -z "$repostring" ]; then
-    repostring="$(egrep 'squeeze|wheezy|jessie|stretch|buster|lucid|precise|trusty|xenial|focal' /etc/apt/sources.list)"
+    repostring="$(egrep 'squeeze|wheezy|jessie|stretch|buster|lucid|precise|trusty|xenial|focal|hirsuite|impish|jammy' /etc/apt/sources.list)"
   fi
   # Debian & Ubuntu post security updates in a reliable way
   errata_support=true
@@ -100,7 +103,7 @@ function discern_debvers() {
       distro=debian distrovers=8 EOL=true
       ;;
     *stretch*)
-      distro=debian distrovers=9 EOL=false
+      distro=debian distrovers=9 EOL=true
       ;;
     *buster*)
       distro=debian distrovers=10 EOL=false
@@ -124,10 +127,16 @@ function discern_debvers() {
       distro=ubuntu distrovers=20 EOL=false
       ;;
     *groovy*)
-      distro=ubuntu distrovers=20.10 EOL=false
+      distro=ubuntu distrovers=20.10 EOL=true
       ;;
     *hirsute*)
-      distro=ubuntu distrovers=21.04 EOL=false
+      distro=ubuntu distrovers=21.04 EOL=true
+      ;;
+    *impish*)
+      distro=ubuntu distrovers=21.10 EOL=false
+      ;;
+    *jammy*)
+      distro=ubuntu distrovers=22.04 EOL=false
       ;;
     *)
       exit 3
