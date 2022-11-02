@@ -223,7 +223,8 @@ function debian_check_updates() {
 }
 
 function redhat_check_updates() {
-  security_updates="$(yum -q clean all; yum -q --security check-update | wc -l)"
+  yum -q clean all 1>/dev/null
+  security_updates="$(yum -q --security check-update | wc -l)"
   all_updates="$(yum check-update -q | wc -l)"
 }
 
