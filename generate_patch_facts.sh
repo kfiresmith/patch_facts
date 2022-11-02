@@ -157,7 +157,7 @@ function discern_redhatvers() {
   redhat_release="$(cat /etc/redhat-release)"
   case "$redhat_release" in
     *"Red Hat Enterprise Linux"*)
-      distro=rhel
+      distro=redhat
       errata_support=true
       case "$redhat_release" in
         *"Tikanga"*)
@@ -223,7 +223,7 @@ function debian_check_updates() {
 }
 
 function redhat_check_updates() {
-  security_updates="$(yum -q updateinfo list security | wc -l)"
+  security_updates="$(yum -q clean all; yum -q --security check-update | wc -l)"
   all_updates="$(yum check-update -q | wc -l)"
 }
 
