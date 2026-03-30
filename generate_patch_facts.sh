@@ -18,12 +18,12 @@
 #  - We should probably add support for AlmaLinux
 #
 # Supports the following Linux variants and major versions:
-#  - Debian 4 -> 12
-#  - Ubuntu LTS 10 -> 22
+#  - Debian 4 -> 13
+#  - Ubuntu 10.04 -> 25.10
 #
 #  - CentOS 5 -> 8
-#  - RHEL 5 -> 9
-#  - Rocky Linux 8 -> 9
+#  - RHEL 5 -> 10
+#  - Rocky Linux 8 -> 10
 #
 # Variables created:
 #  - OS-Release (string)
@@ -86,55 +86,67 @@ os_updates_broken=false
 # By default, set needs_reboot to unknown
 needs_reboot=unknown
 
-# EOL dates in epoch time
-eoldate_centos_5="1491051661"  # 2017-04
-eoldate_centos_6="1606827661"  # 2020-12
-eoldate_centos_7="1719863504"  # 2024-07
-eoldate_centos_8="1641042061"  # 2022-01
-eoldate_debian_etch="0"
-eoldate_debian_lenny="0"
-eoldate_debian_squeeze="0"
-eoldate_debian_wheezy="0"
-eoldate_debian_jessie="0"
-eoldate_debian_stretch="0"
-eoldate_debian_buster="1719858457"
-eoldate_debian_bullseye="1782930457"  # Just a guess at this point (2023-04)
-eoldate_debian_bookworm="1846088857"  # Just a guess at this point (2023-04)
-#eoldate_redhatenterpriseserver_tikanga="1491051661"   # 2017-04
-eoldate_rhel_5="1491051661"   # 2017-04
-#eoldate_redhatenterpriseserver_santiago="1606827661"  # 2020-12
-eoldate_rhel_6="1606827661"  # 2020-12
-#eoldate_redhatenterpriseserver_maipo="1719863504"     # 2024-07
-eoldate_rhel_7="1719863504"     # 2024-07
-#eoldate_redhatenterprise_ootpa="1872334861"     # 2029-05
-eoldate_rhel_8="1872334861"     # 2029-05
-#eoldate_redhatenterprise_plow="1967029261"     # 2032-05
-eoldate_rhel_9="1967029261"     # 2032-05 lsb_release not shipped in RHEL 9 / Rocky 9
-#eoldate_redhatenterprise_9="1967029261"     # 2032-05 lsb_release not shipped in RHEL 9 / Rocky 9
-eoldate_rocky_8="1872334861"         # 2029-05 lsb_release not shipped in Rocky 8 minimal base
-eoldate_rocky_9="1967029261"         # 2032-05 lsb_release not shipped in RHEL 9 / Rocky 9
-eoldate_ubuntu_precise="0"  # 2017-05
-eoldate_ubuntu_quantal="0"  # 2014-05
-eoldate_ubuntu_raring="0"   # 2014-02
-eoldate_ubuntu_saucy="0"    # 2014-08
-eoldate_ubuntu_trusty="0"   # 2019-05
-eoldate_ubuntu_utopic="0"   # 2015-08
-eoldate_ubuntu_vivid="0"    # 2016-02
-eoldate_ubuntu_wily="0"     # 2016-08
-eoldate_ubuntu_xenial="1609530704"   # 2021-04
-eoldate_ubuntu_yakkety="0"           # 2017-08
-eoldate_ubuntu_artful="0"            # 2018-08
-eoldate_ubuntu_bionic="1685649104"   # 2023-06
-eoldate_ubuntu_cosmic="0"            # 2019-08
-eoldate_ubuntu_disco="0"             # 2020-02
-eoldate_ubuntu_eoan="0"              # 2020-08
-eoldate_ubuntu_focal="1743537104"    # 2025-04
-eoldate_ubuntu_groovy="0"            # 2021-08
-eoldate_ubuntu_hirsuite="0"          # 2022-02
-eoldate_ubuntu_impish="0"            # 2022-08
-eoldate_ubuntu_jammy="1806609104"    # 2027-04
-eoldate_ubuntu_kinetic="1688241104"  # 2023-07
-eoldate_ubuntu_lunar="1712001104"    # 2024-04
+# EOL dates in epoch time, normalized to 23:59:59 UTC on the listed support end
+# date from endoflife.date. For Debian this tracks Debian LTS; for Ubuntu it
+# tracks Maintenance & Security Support; for RHEL it tracks Maintenance Support;
+# for Rocky Linux it tracks Security Support.
+eoldate_centos_5="1491004799"    # 2017-03-31
+eoldate_centos_6="1606780799"    # 2020-11-30
+eoldate_centos_7="1719791999"    # 2024-06-30
+eoldate_centos_8="1640995199"    # 2021-12-31
+eoldate_debian_etch="1266278399"     # 2010-02-15
+eoldate_debian_lenny="1328572799"    # 2012-02-06
+eoldate_debian_squeeze="1456790399"  # 2016-02-29
+eoldate_debian_wheezy="1527811199"   # 2018-05-31
+eoldate_debian_jessie="1593561599"   # 2020-06-30
+eoldate_debian_stretch="1656719999"  # 2022-07-01
+eoldate_debian_buster="1719791999"   # 2024-06-30
+eoldate_debian_bullseye="1788220799" # 2026-08-31
+eoldate_debian_bookworm="1846022399" # 2028-06-30
+eoldate_debian_trixie="1909094399"   # 2030-06-30
+#eoldate_redhatenterpriseserver_tikanga="1491004799"   # 2017-03-31
+eoldate_rhel_5="1491004799"          # 2017-03-31
+#eoldate_redhatenterpriseserver_santiago="1606780799"  # 2020-11-30
+eoldate_rhel_6="1606780799"          # 2020-11-30
+#eoldate_redhatenterpriseserver_maipo="1719791999"     # 2024-06-30
+eoldate_rhel_7="1719791999"          # 2024-06-30
+#eoldate_redhatenterprise_ootpa="1874966399"           # 2029-05-31
+eoldate_rhel_8="1874966399"          # 2029-05-31
+#eoldate_redhatenterprise_plow="1969660799"            # 2032-05-31
+eoldate_rhel_9="1969660799"          # 2032-05-31
+eoldate_rhel_10="2064268799"         # 2035-05-31
+eoldate_rocky_8="1874966399"         # 2029-05-31
+eoldate_rocky_9="1969660799"         # 2032-05-31
+eoldate_rocky_10="2064268799"        # 2035-05-31
+eoldate_ubuntu_lucid="1368143999"    # 2013-05-09 10.04 LTS
+eoldate_ubuntu_precise="1493423999"  # 2017-04-28 12.04 LTS
+eoldate_ubuntu_quantal="1400284799"  # 2014-05-16 12.10
+eoldate_ubuntu_raring="1390867199"   # 2014-01-27 13.04
+eoldate_ubuntu_saucy="1405641599"    # 2014-07-17 13.10
+eoldate_ubuntu_trusty="1554249599"   # 2019-04-02 14.04 LTS
+eoldate_ubuntu_utopic="1437695999"   # 2015-07-23 14.10
+eoldate_ubuntu_vivid="1454630399"    # 2016-02-04 15.04
+eoldate_ubuntu_wily="1469750399"     # 2016-07-28 15.10
+eoldate_ubuntu_xenial="1617407999"   # 2021-04-02 16.04 LTS
+eoldate_ubuntu_yakkety="1500595199"  # 2017-07-20 16.10
+eoldate_ubuntu_zesty="1515887999"    # 2018-01-13 17.04
+eoldate_ubuntu_artful="1532044799"   # 2018-07-19 17.10
+eoldate_ubuntu_bionic="1685577599"   # 2023-05-31 18.04 LTS
+eoldate_ubuntu_cosmic="1563494399"   # 2019-07-18 18.10
+eoldate_ubuntu_disco="1579823999"    # 2020-01-23 19.04
+eoldate_ubuntu_eoan="1594079999"     # 2020-07-06 19.10
+eoldate_ubuntu_focal="1748735999"    # 2025-05-31 20.04 LTS
+eoldate_ubuntu_groovy="1626998399"   # 2021-07-22 20.10
+eoldate_ubuntu_hirsuite="1642723199" # 2022-01-20 21.04
+eoldate_ubuntu_impish="1657843199"   # 2022-07-14 21.10
+eoldate_ubuntu_jammy="1806623999"    # 2027-04-01 22.04 LTS
+eoldate_ubuntu_kinetic="1689897599"  # 2023-07-20 22.10
+eoldate_ubuntu_lunar="1705795199"    # 2024-01-20 23.04
+eoldate_ubuntu_mantic="1720828799"   # 2024-07-12 23.10
+eoldate_ubuntu_noble="1874966399"    # 2029-05-31 24.04 LTS
+eoldate_ubuntu_oracular="1752191999" # 2025-07-10 24.10
+eoldate_ubuntu_plucky="1768694399"   # 2026-01-17 25.04
+eoldate_ubuntu_questing="1782950399" # 2026-07-01 25.10
 
 # Collect details on the OS: Distribution [eg: ubuntu], Release [eg: 20.04], Codename [eg: focal]
 function collect_os_details() {
@@ -154,7 +166,7 @@ function collect_os_details() {
       os_id="$(grep -E ^ID= /etc/os-release | cut -f2 -d= | sed 's/"//g' | tr '[:upper:]' '[:lower:]')"
       if [[ x"$os_id" == xrocky || x"$os_id" == xrhel ]]; then
         osdistribution="$os_id"
-        osrelease="$(grep -E ^VERSION_ID /etc/os-release | cut -f2 -d= | cut -c2)"
+        osrelease="$(grep -E '^VERSION_ID=' /etc/os-release | cut -f2 -d= | tr -d '"' | tr '[:upper:]' '[:lower:]')"
       else
         # If a system doesn't have lsb_release and isn't RHEL or Rocky, we want the job to fail
         #  and let us know about it so that we can write in support.
