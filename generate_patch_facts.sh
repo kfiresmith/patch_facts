@@ -14,6 +14,8 @@
 #     broken
 #  - We should figure out how to discern systems configured for extended support
 #      and update their EOL status or otherwise denote they are under ESM/EUS/ELS
+#  - We should improve reboot-needed detection for RHEL-family systems; testing on
+#      Rocky 8.10, 9.6, and 10.1 still reports needs_reboot=unknown
 #
 #  - We should probably add support for AlmaLinux
 #
@@ -84,6 +86,9 @@ os_updates_broken=false
 
 # By default, set needs_reboot to unknown
 needs_reboot=unknown
+
+# Package manager for EL-family systems, set on demand.
+redhat_pkgmgr=""
 
 # EOL dates in epoch time, normalized to 23:59:59 UTC on the listed support end
 # date from endoflife.date. For Debian this tracks Debian LTS; for Ubuntu it
@@ -184,6 +189,7 @@ collect_os_details() {
 
 support_status() {
   local eoldate=0
+  local eoldate_string=""
 
   # We have to do this because of a couple problems with Red Hat variants:
   #  1. Centos calls every codename "(Final)" - not helpful
@@ -259,7 +265,17 @@ debian_check_updates() {
   fi
 }
 
-yum_set_update_count() {
+detect_redhat_pkgmgr() {
+  if command -v dnf >/dev/null 2>&1; then
+    redhat_pkgmgr="dnf"
+  elif command -v yum >/dev/null 2>&1; then
+    redhat_pkgmgr="yum"
+  else
+    redhat_pkgmgr=""
+  fi
+}
+
+redhat_set_update_count() {
   local output=""
   local rc=0
   local count=0
@@ -267,7 +283,13 @@ yum_set_update_count() {
 
   shift
 
-  output="$(yum "$@" 2>&1)"
+  if [[ -z "$redhat_pkgmgr" ]]; then
+    os_updates_broken=true
+    printf -v "$result_var" '%s' "0"
+    return
+  fi
+
+  output="$("$redhat_pkgmgr" "$@" 2>&1)"
   rc=$?
 
   case "$rc" in
@@ -292,9 +314,17 @@ yum_set_update_count() {
 
 redhat_check_updates() {
   errata_support=true
-  yum -q clean all >/dev/null 2>&1 || os_updates_broken=true
-  yum_set_update_count security_updates -q --security check-update
-  yum_set_update_count all_updates -q check-update
+  detect_redhat_pkgmgr
+  if [[ -z "$redhat_pkgmgr" ]]; then
+    os_updates_broken=true
+    security_updates=0
+    all_updates=0
+    return
+  fi
+
+  "$redhat_pkgmgr" -q clean all >/dev/null 2>&1 || os_updates_broken=true
+  redhat_set_update_count security_updates -q --security check-update
+  redhat_set_update_count all_updates -q check-update
 }
 
 # CentOS doesn't publish security errata, so we can't use `list security`.
@@ -302,8 +332,15 @@ redhat_check_updates() {
 centos_check_updates() {
   errata_support=false
   security_updates="-1"
-  yum -q clean all >/dev/null 2>&1 || os_updates_broken=true
-  yum_set_update_count all_updates -q check-update
+  detect_redhat_pkgmgr
+  if [[ -z "$redhat_pkgmgr" ]]; then
+    os_updates_broken=true
+    all_updates=0
+    return
+  fi
+
+  "$redhat_pkgmgr" -q clean all >/dev/null 2>&1 || os_updates_broken=true
+  redhat_set_update_count all_updates -q check-update
 }
 
 ensure_ansible_factspath() {
@@ -327,7 +364,47 @@ json_escape() {
 # Here's where we try to determine if a system needs to be rebooted in order
 #   to load patched versions of the kernel, services, or libraries.
 
+run_redhat_needs_restarting() {
+  local needs_restarting_cmd=""
+  local output_var="$1"
+  local rc_var="$2"
+  local supported_var="$3"
+
+  shift 3
+
+  printf -v "$output_var" '%s' ""
+  printf -v "$rc_var" '%s' "2"
+  printf -v "$supported_var" '%s' "false"
+
+  if command -v needs-restarting >/dev/null 2>&1; then
+    needs_restarting_cmd="$(command -v needs-restarting)"
+    printf -v "$output_var" '%s' "$("$needs_restarting_cmd" "$@" 2>&1)"
+    printf -v "$rc_var" '%s' "$?"
+    printf -v "$supported_var" '%s' "true"
+    return
+  fi
+
+  detect_redhat_pkgmgr
+  if [[ -z "$redhat_pkgmgr" ]]; then
+    return
+  fi
+
+  printf -v "$output_var" '%s' "$("$redhat_pkgmgr" needs-restarting "$@" 2>&1)"
+  printf -v "$rc_var" '%s' "$?"
+
+  case "${!output_var}" in
+    *"No such command"* | *"unknown command"* | *"No such option"* )
+      ;;
+    *)
+      printf -v "$supported_var" '%s' "true"
+      ;;
+  esac
+}
+
 check_needs_reboot() {
+  local needs_restarting_output=""
+  local needs_restarting_rc=2
+  local needs_restarting_supported=false
   local restartable_procs=0
 
   case $osdistribution in
@@ -354,8 +431,9 @@ check_needs_reboot() {
         #   command, so we have to check for output, which only happens when
         #   a system has procs that need to be reloaded.
         "6")
-          if [[ -f /usr/bin/needs-restarting ]]; then
-            restartable_procs=$(/usr/bin/needs-restarting | wc -l)
+          run_redhat_needs_restarting needs_restarting_output needs_restarting_rc needs_restarting_supported
+          if $needs_restarting_supported; then
+            restartable_procs="$(printf '%s\n' "$needs_restarting_output" | awk 'NF { count++ } END { print count + 0 }')"
             if (( restartable_procs > 0 )); then
               needs_reboot=true
             else
@@ -369,11 +447,14 @@ check_needs_reboot() {
         #   that it'll be el7+, which is a new enough version of yum-utils to use a
         #   determinative RC - 0: all good, 1: needs restarting.
         *)
-          if [[ -f /usr/bin/needs-restarting ]]; then
-            if /usr/bin/needs-restarting -r 1>/dev/null; then
+          run_redhat_needs_restarting needs_restarting_output needs_restarting_rc needs_restarting_supported -r
+          if $needs_restarting_supported; then
+            if (( needs_restarting_rc == 0 )); then
               needs_reboot=false
-            else
+            elif (( needs_restarting_rc == 1 )); then
               needs_reboot=true
+            else
+              needs_reboot=unknown
             fi
           else
             needs_reboot=unknown
