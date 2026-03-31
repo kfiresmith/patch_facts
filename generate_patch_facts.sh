@@ -12,12 +12,15 @@
 # Room for future improvement:
 #  - We should check for missing core repositories and treat that as updates being
 #     broken
-#  - We should figure out how to discern systems configured for extended support
-#      and update their EOL status or otherwise denote they are under ESM/EUS/ELS
-#  - We should improve reboot-needed detection for RHEL-family systems; testing on
-#      Rocky 8.10, 9.6, and 10.1 still reports needs_reboot=unknown
-#
 #  - We should probably add support for AlmaLinux
+#  - We should add os_updates_broken_reason so package/repository failures are
+#      easier to troubleshoot
+#  - We should add an optional debug mode to explain what commands ran and how
+#      support/update decisions were derived
+#  - We should add a self-test mode with fixtures so logic changes can be tested
+#      without needing live VMs
+#  - We should extend support-extension detection for RHEL-family systems such
+#      as EUS/E4S/ELS if we need that coverage
 #
 # Supports the following Linux variants and major versions:
 #  - Debian 4 -> 13
@@ -31,11 +34,23 @@
 #  - OS-Release (string)
 #  - Security errata support (boolean)
 #  - EOL (boolean)
+#  - Support Status (string)
+#  - Support Extension (string)
+#  - Effective Support Status (string)
 #  - All Outstanding Packages Count (integer)
 #  - Security Outstanding Packages Count (integer)
 #  - ISO-8601 Date of Collection (string)
 #
 # 2022-05-03 Kodiak Firesmith <firesmith@protonmail.com>
+#
+#  - Updated 2026-03:
+#     - Refresh EOL dates and add current Debian, Ubuntu, RHEL, and Rocky releases
+#     - Add support_status, support_extension, and effective_support_status fields
+#     - Improve Ubuntu Pro / ESM detection using `pro status --format json`
+#     - Prefer dnf over yum on EL-family systems where available
+#     - Improve EL-family reboot detection using needs-restarting via binary or
+#         package-manager subcommand
+#     - General shell/style cleanup and safer JSON output formatting
 #
 #  - Updated 2023-04:
 #     - Major rewrite of script to key EOL based on time rather than static settings
@@ -83,6 +98,11 @@ epoch_now="$(date +%s)"
 
 # By default, assume OS updates are not broken.  We check later on if they are.
 os_updates_broken=false
+
+# By default, support status is unknown until evaluated.
+support_status_value=unknown
+support_extension=none
+effective_support_status=unknown
 
 # By default, set needs_reboot to unknown
 needs_reboot=unknown
@@ -205,12 +225,85 @@ support_status() {
     eoldate="${!eoldate_string}"
     if (( eoldate <= epoch_now )); then
       is_eol=true
+      support_status_value=eol
     else
       is_eol=false
+      support_status_value=supported
     fi
   else
     # Unknown releases are treated as unsupported rather than silently supported.
     is_eol=true
+    support_status_value=unknown
+  fi
+}
+
+ubuntu_esm_repo_enabled() {
+  if [[ -r /etc/apt/sources.list ]] && grep -Eqs '^[[:space:]]*deb .*(esm\.ubuntu\.com/(infra|apps)/ubuntu)' /etc/apt/sources.list; then
+    return 0
+  fi
+
+  if compgen -G "/etc/apt/sources.list.d/*.list" >/dev/null; then
+    if grep -Eqs '^[[:space:]]*deb .*(esm\.ubuntu\.com/(infra|apps)/ubuntu)' /etc/apt/sources.list.d/*.list; then
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
+ubuntu_pro_json_reports_esm() {
+  local pro_cmd="$1"
+  local pro_json=""
+  local expires_at=""
+  local expires_epoch=0
+
+  pro_json="$("$pro_cmd" status --format json 2>/dev/null)" || return 1
+
+  if ! printf '%s\n' "$pro_json" | grep -Eq '"result"[[:space:]]*:[[:space:]]*"success"'; then
+    return 1
+  fi
+
+  if ! printf '%s\n' "$pro_json" | grep -Eq '"attached"[[:space:]]*:[[:space:]]*true'; then
+    return 1
+  fi
+
+  expires_at="$(printf '%s\n' "$pro_json" | grep -Eo '"expires"[[:space:]]*:[[:space:]]*"[^"]+"' | sed -E 's/^"expires"[[:space:]]*:[[:space:]]*"([^"]+)"$/\1/')"
+  if [[ -z "$expires_at" ]]; then
+    return 1
+  fi
+
+  expires_epoch="$(date -d "$expires_at" +%s 2>/dev/null)" || return 1
+  if (( expires_epoch <= epoch_now )); then
+    return 1
+  fi
+
+  if printf '%s\n' "$pro_json" | grep -Eq '"name"[[:space:]]*:[[:space:]]*"esm-(infra|apps)".*"status"[[:space:]]*:[[:space:]]*"enabled"'; then
+    return 0
+  fi
+
+  return 1
+}
+
+detect_extended_support() {
+  support_extension=none
+  effective_support_status="$support_status_value"
+
+  if [[ "$osdistribution" == "ubuntu" ]]; then
+    if command -v pro >/dev/null 2>&1; then
+      if ubuntu_pro_json_reports_esm pro; then
+        support_extension=esm
+      fi
+    elif command -v ubuntu-advantage >/dev/null 2>&1; then
+      if ubuntu_pro_json_reports_esm ubuntu-advantage; then
+        support_extension=esm
+      fi
+    elif ubuntu_esm_repo_enabled; then
+      support_extension=esm
+    fi
+  fi
+
+  if [[ "$support_status_value" == "eol" && "$support_extension" != "none" ]]; then
+    effective_support_status=extended-support
   fi
 }
 
@@ -471,6 +564,7 @@ collect_os_details
 
 # Then we check the EOL status of the system
 support_status
+detect_extended_support
 
 # Next we check for the patching status
 if [[ "$osdistribution" == "debian" || "$osdistribution" == "ubuntu" ]]; then
@@ -489,8 +583,11 @@ check_needs_reboot
 # Write those facts out!
 if $store_ansible_fact; then
   ensure_ansible_factspath
-  printf '{"eol":"%s","errata_support":"%s","security_updates":"%s","all_updates":"%s","os_updates_broken":"%s","needs_reboot":"%s","uptime_days":"%s","date_collected":"%s"}\n' \
+  printf '{"eol":"%s","support_status":"%s","support_extension":"%s","effective_support_status":"%s","errata_support":"%s","security_updates":"%s","all_updates":"%s","os_updates_broken":"%s","needs_reboot":"%s","uptime_days":"%s","date_collected":"%s"}\n' \
     "$(json_escape "$is_eol")" \
+    "$(json_escape "$support_status_value")" \
+    "$(json_escape "$support_extension")" \
+    "$(json_escape "$effective_support_status")" \
     "$(json_escape "$errata_support")" \
     "$(json_escape "$security_updates")" \
     "$(json_escape "$all_updates")" \
