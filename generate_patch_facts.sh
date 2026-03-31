@@ -51,9 +51,8 @@
 # Don't let this script run w/o the ability to do things like update the package
 #  cache.  And don't accidentally blow out /var/cache with non-root duplicates
 #  of YUM caches.
-running_as="$(whoami)" #Turns out we can't trust $USER to always be set :/
-if [[ "$running_as" != "root" ]]; then
-  echo "this script requires rootly powers"
+if (( EUID != 0 )); then
+  printf '%s\n' "this script requires rootly powers"
   exit 2
 fi
 
@@ -76,7 +75,7 @@ date_collected="$(date -I'minutes')"
 #  0 seconds to 23 hours and 59 minutes will be '0 days up', and from thereon will be the whole
 #  number of days up.
 uptime_seconds="$(awk -F'.' '{print $1}' /proc/uptime)"
-uptime_days="$(( $uptime_seconds / 60 / 60 / 24))"
+uptime_days="$((uptime_seconds / 60 / 60 / 24))"
 
 epoch_now="$(date +%s)"
 
@@ -144,57 +143,68 @@ eoldate_ubuntu_plucky="1768694399"   # 2026-01-17 25.04
 eoldate_ubuntu_questing="1782950399" # 2026-07-01 25.10
 
 # Collect details on the OS: Distribution [eg: ubuntu], Release [eg: 20.04], Codename [eg: focal]
-function collect_os_details() {
+collect_os_details() {
+  local os_id=""
+  local version_codename=""
+
   if command -v lsb_release >/dev/null 2>&1; then
-      osdistribution="$(lsb_release -s -i | tr '[:upper:]' '[:lower:]')"
-      osrelease="$(lsb_release -s -r | tr '[:upper:]' '[:lower:]')"
-      oscodename="$(lsb_release -s -c | tr '[:upper:]' '[:lower:]')"
-      # We need to normalize the distribution naming for RHEL, to cope with non-uniform values
-      #  and also to match the output of the alternate os-release output when lsb_release is
-      #  not present, as with RHEL 8 & 9
-      if [[ x"${osdistribution:0:6}" == xredhat ]]; then
-        osdistribution="rhel"
-      fi
+    osdistribution="$(lsb_release -s -i | tr '[:upper:]' '[:lower:]')"
+    osrelease="$(lsb_release -s -r | tr '[:upper:]' '[:lower:]')"
+    oscodename="$(lsb_release -s -c | tr '[:upper:]' '[:lower:]')"
   else
-    # For systems that don't have lsb_release, as a last ditch effort, we'll parse /etc/os-release
     if [[ -r /etc/os-release ]]; then
-      os_id="$(grep -E ^ID= /etc/os-release | cut -f2 -d= | sed 's/"//g' | tr '[:upper:]' '[:lower:]')"
-      if [[ x"$os_id" == xrocky || x"$os_id" == xrhel ]]; then
-        osdistribution="$os_id"
-        osrelease="$(grep -E '^VERSION_ID=' /etc/os-release | cut -f2 -d= | tr -d '"' | tr '[:upper:]' '[:lower:]')"
-      else
-        # If a system doesn't have lsb_release and isn't RHEL or Rocky, we want the job to fail
-        #  and let us know about it so that we can write in support.
-        echo "system unable to be identified"
-        exit 2
-      fi
+      # shellcheck disable=SC1091
+      . /etc/os-release
+
+      os_id="${ID,,}"
+      version_codename="${VERSION_CODENAME:-${UBUNTU_CODENAME:-}}"
+      osdistribution="$os_id"
+      osrelease="${VERSION_ID,,}"
+      oscodename="${version_codename,,}"
+    else
+      printf '%s\n' "system unable to be identified"
+      exit 2
     fi
   fi
+
+  # Normalize Red Hat's non-uniform naming to match our variable scheme.
+  if [[ "${osdistribution:0:6}" == "redhat" ]]; then
+    osdistribution="rhel"
+  fi
+
+  case "$osdistribution" in
+    debian | ubuntu | centos | rhel | rocky)
+      ;;
+    *)
+      printf '%s\n' "system unable to be identified"
+      exit 2
+      ;;
+  esac
 }
 
-function support_status() {
+support_status() {
+  local eoldate=0
+
   # We have to do this because of a couple problems with Red Hat variants:
   #  1. Centos calls every codename "(Final)" - not helpful
   #  2. Rocky and RHEL fail to have lsb_release as part of their core command set
-  if [[ x"$osdistribution" == xcentos || x"$osdistribution" == xrocky || x"$osdistribution" == xrhel ]]; then
-    majrelease="$(echo $osrelease | cut -f1 -d.)"
+  if [[ "$osdistribution" == "centos" || "$osdistribution" == "rocky" || "$osdistribution" == "rhel" ]]; then
+    majrelease="${osrelease%%.*}"
     eoldate_string="eoldate_${osdistribution}_${majrelease}"
-    if [[ x"${!eoldate_string}" < x$epoch_now ]]; then
+  else
+    eoldate_string="eoldate_${osdistribution}_${oscodename}"
+  fi
+
+  if [[ ${!eoldate_string:-} =~ ^[0-9]+$ ]]; then
+    eoldate="${!eoldate_string}"
+    if (( eoldate <= epoch_now )); then
       is_eol=true
     else
       is_eol=false
     fi
   else
-    # Evaluate the eoldate - only a subset of possible OS distros and release codenames are
-    #  covered in our static EOL date strings, so if those variables don't exist, we just
-    #  compare 'x' against the much larger x + current epoch time.  Most EOL distros don't have
-    #  a static EOL date string in this script
-    eoldate_string="eoldate_${osdistribution}_${oscodename}"
-    if [[ x"${!eoldate_string}" < x$epoch_now ]]; then
-      is_eol=true
-    else
-      is_eol=false
-    fi
+    # Unknown releases are treated as unsupported rather than silently supported.
+    is_eol=true
   fi
 }
 
@@ -202,50 +212,129 @@ function support_status() {
 # We clean the APT cache, then force it to refresh.  By forcing APT cache 
 #  refresh, we ensure we have the most current status for updates, and we catch
 #  any hosts that have broken APT - a common cause for silent patch logjams.
-function debian_check_updates() {
+debian_check_updates() {
+  local apt_check_rc=0
+  local apt_upgrade_output=""
+  local parsed_counts=""
+  local updatedata=""
+
   errata_support=true
   apt-get clean
   apt-get -qq update 2>/dev/null || os_updates_broken=true
-  if [ -f "/usr/lib/update-notifier/apt-check" ]; then
+
+  if [[ -f /usr/lib/update-notifier/apt-check ]]; then
     updatedata="$(/usr/lib/update-notifier/apt-check 2>&1)"
-    security_updates="$(echo $updatedata | cut -d";" -f2)"
-    all_updates="$(echo $updatedata | cut -d";" -f1)"
+    apt_check_rc=$?
+
+    if (( apt_check_rc == 0 )); then
+      IFS=';' read -r all_updates security_updates _ <<< "$updatedata"
+    else
+      os_updates_broken=true
+      all_updates=0
+      security_updates=0
+    fi
   else
-    security_updates="$(apt-get upgrade -s | egrep '^Inst ' | grep -i security | wc -l)"
-    all_updates="$(apt-get upgrade -s | egrep '^Inst ' | wc -l)"
+    apt_upgrade_output="$(apt-get -s upgrade 2>&1)"
+    apt_check_rc=$?
+
+    if (( apt_check_rc == 0 )); then
+      parsed_counts="$(
+        printf '%s\n' "$apt_upgrade_output" | awk '
+          BEGIN { all = 0; security = 0 }
+          /^Inst / {
+            all++
+            if (tolower($0) ~ /security/) {
+              security++
+            }
+          }
+          END { printf "%d;%d\n", all, security }
+        '
+      )"
+      IFS=';' read -r all_updates security_updates <<< "$parsed_counts"
+    else
+      os_updates_broken=true
+      all_updates=0
+      security_updates=0
+    fi
   fi
 }
 
-function redhat_check_updates() {
+yum_set_update_count() {
+  local output=""
+  local rc=0
+  local count=0
+  local result_var="$1"
+
+  shift
+
+  output="$(yum "$@" 2>&1)"
+  rc=$?
+
+  case "$rc" in
+    0 | 100)
+      ;;
+    *)
+      os_updates_broken=true
+      printf -v "$result_var" '%s' "0"
+      return
+      ;;
+  esac
+
+  count="$(
+    printf '%s\n' "$output" | awk '
+    NF >= 3 && $1 !~ /^(Loaded|Loading|Last|Security:|Obsoleting|Excluding|Error:)$/ { count++ }
+    END { print count + 0 }
+  '
+  )"
+
+  printf -v "$result_var" '%s' "$count"
+}
+
+redhat_check_updates() {
   errata_support=true
-  yum -q clean all 1>/dev/null
-  security_updates="$(yum -q --security check-update | wc -l)"
-  all_updates="$(yum check-update -q | wc -l)"
+  yum -q clean all >/dev/null 2>&1 || os_updates_broken=true
+  yum_set_update_count security_updates -q --security check-update
+  yum_set_update_count all_updates -q check-update
 }
 
 # CentOS doesn't publish security errata, so we can't use `list security`.
 # Instead we just toss out `-1` to make it easy to discern that this is a bogus value.
-function centos_check_updates() {
+centos_check_updates() {
   errata_support=false
   security_updates="-1"
-  all_updates="$(yum check-update -q | wc -l)"
+  yum -q clean all >/dev/null 2>&1 || os_updates_broken=true
+  yum_set_update_count all_updates -q check-update
 }
 
-function ensure_ansible_factspath() {
+ensure_ansible_factspath() {
   if [[ ! -d $ansible_factspath ]]; then
-    mkdir -p $ansible_factspath
+    mkdir -p "$ansible_factspath"
   fi
+}
+
+json_escape() {
+  local value="$1"
+
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  value="${value//$'\n'/\\n}"
+  value="${value//$'\r'/\\r}"
+  value="${value//$'\t'/\\t}"
+
+  printf '%s' "$value"
 }
 
 # Here's where we try to determine if a system needs to be rebooted in order
 #   to load patched versions of the kernel, services, or libraries.
 
-function needs_reboot() {
+check_needs_reboot() {
+  local restartable_procs=0
+
   case $osdistribution in
     # For Debian variants, this is easy and uniform across all common versions
     #   of Debian and Ubuntu.
     "debian" | "ubuntu")
-      if [ -f /var/run/reboot-required ]; then
+      if [[ -f /var/run/reboot-required ]]; then
         needs_reboot=true
       else
         needs_reboot=false
@@ -265,20 +354,22 @@ function needs_reboot() {
         #   command, so we have to check for output, which only happens when
         #   a system has procs that need to be reloaded.
         "6")
-          if [ -f "/usr/bin/needs-restarting" ]; then
+          if [[ -f /usr/bin/needs-restarting ]]; then
             restartable_procs=$(/usr/bin/needs-restarting | wc -l)
-            if (( $restartable_procs > 0 )); then
+            if (( restartable_procs > 0 )); then
               needs_reboot=true
             else
               needs_reboot=false
             fi
+          else
+            needs_reboot=unknown
           fi
           ;;
         # This is the catch-all with the understanding that if it's not el5 nor el6
         #   that it'll be el7+, which is a new enough version of yum-utils to use a
         #   determinative RC - 0: all good, 1: needs restarting.
         *)
-          if [ -f "/usr/bin/needs-restarting" ]; then
+          if [[ -f /usr/bin/needs-restarting ]]; then
             if /usr/bin/needs-restarting -r 1>/dev/null; then
               needs_reboot=false
             else
@@ -301,22 +392,30 @@ collect_os_details
 support_status
 
 # Next we check for the patching status
-if [[ x"$osdistribution" == xdebian || x"$osdistribution" == xubuntu ]]; then
+if [[ "$osdistribution" == "debian" || "$osdistribution" == "ubuntu" ]]; then
   debian_check_updates
-elif [[ x"$osdistribution" == xrhel || x"$osdistribution" == xrocky ]]; then
+elif [[ "$osdistribution" == "rhel" || "$osdistribution" == "rocky" ]]; then
   # If a system is RHEL or Rocky, we can check for security errata
   redhat_check_updates
-elif [[ x"$osdistribution" == xcentos ]]; then
+elif [[ "$osdistribution" == "centos" ]]; then
   # We need a separate check for CentOS because this OS doesn't provide security errata
   centos_check_updates
 fi
   
 # Finally we check to see if the system needs to be rebooted
-needs_reboot
+check_needs_reboot
 
 # Write those facts out!
 if $store_ansible_fact; then
   ensure_ansible_factspath
-  JSON_FMT='{"eol":"%s","errata_support":"%s","security_updates":"%s", "all_updates": "%s", "os_updates_broken": "%s", "needs_reboot": "%s", "uptime_days": "%s", "date_collected": "%s"}\n'
-  printf "$JSON_FMT" "$is_eol" "$errata_support" "$security_updates" "$all_updates" "$os_updates_broken" "$needs_reboot" "$uptime_days" "$date_collected" > $ansible_factspath/$factname.fact
+  printf '{"eol":"%s","errata_support":"%s","security_updates":"%s","all_updates":"%s","os_updates_broken":"%s","needs_reboot":"%s","uptime_days":"%s","date_collected":"%s"}\n' \
+    "$(json_escape "$is_eol")" \
+    "$(json_escape "$errata_support")" \
+    "$(json_escape "$security_updates")" \
+    "$(json_escape "$all_updates")" \
+    "$(json_escape "$os_updates_broken")" \
+    "$(json_escape "$needs_reboot")" \
+    "$(json_escape "$uptime_days")" \
+    "$(json_escape "$date_collected")" \
+    > "$ansible_factspath/$factname.fact"
 fi
