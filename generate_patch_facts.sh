@@ -24,7 +24,7 @@
 #
 # Supports the following Linux variants and major versions:
 #  - Debian 4 -> 13
-#  - Ubuntu 10.04 -> 25.10
+#  - Ubuntu 10.04 -> 26.04
 #
 #  - CentOS 5 -> 8
 #  - RHEL 5 -> 10
@@ -166,6 +166,7 @@ eoldate_ubuntu_noble="1874966399"    # 2029-05-31 24.04 LTS
 eoldate_ubuntu_oracular="1752191999" # 2025-07-10 24.10
 eoldate_ubuntu_plucky="1768694399"   # 2026-01-17 25.04
 eoldate_ubuntu_questing="1782950399" # 2026-07-01 25.10
+eoldate_ubuntu_resolute="1938038399" # 2031-05-31 26.04 LTS
 
 # Collect details on the OS: Distribution [eg: ubuntu], Release [eg: 20.04], Codename [eg: focal]
 collect_os_details() {
